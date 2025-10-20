@@ -1,12 +1,12 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:ditonton/common/constants.dart';
-import 'package:ditonton/common/state_enum.dart';
+// state enum no longer used here after migrating to Bloc
 import 'package:ditonton/domain/entities/tv_series.dart';
 import 'package:ditonton/domain/entities/tv_series_detail.dart';
-import 'package:ditonton/presentation/provider/tv_series/tv_series_detail_notifier.dart';
+import 'package:ditonton/presentation/bloc/tv_series/detail/detail_bloc.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 class TvSeriesDetailPage extends StatefulWidget {
   static const ROUTE_NAME = '/detail-tv-series';
@@ -23,33 +23,34 @@ class _TvSeriesDetailPageState extends State<TvSeriesDetailPage> {
   void initState() {
     super.initState();
     Future.microtask(() {
-      Provider.of<TvSeriesDetailNotifier>(context, listen: false)
-          .fetchTvSeriesDetail(widget.id);
-      Provider.of<TvSeriesDetailNotifier>(context, listen: false)
-          .loadWatchlistStatus(widget.id);
+      context.read<DetailBloc>()
+        ..add(FetchDetail(widget.id))
+        ..add(LoadWatchlistStatus(widget.id));
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Consumer<TvSeriesDetailNotifier>(
-        builder: (context, provider, child) {
-          if (provider.tvSeriesState == RequestState.Loading) {
+      body: BlocBuilder<DetailBloc, DetailState>(
+        builder: (context, state) {
+          if (state.isLoadingDetail) {
             return Center(
               child: CircularProgressIndicator(),
             );
-          } else if (provider.tvSeriesState == RequestState.Loaded) {
-            final movie = provider.tvSeries;
+          } else if (state.tvSeries != null) {
+            final tvSeries = state.tvSeries!;
             return SafeArea(
               child: DetailContent(
-                movie,
-                provider.tvSeriesRecommendations,
-                provider.isAddedToWatchlist,
+                tvSeries,
+                state.recommendations,
+                state.isAddedToWatchlist,
               ),
             );
+          } else if (state.message.isNotEmpty) {
+            return Center(child: Text(state.message));
           } else {
-            return Text(provider.message);
+            return SizedBox.shrink();
           }
         },
       ),
@@ -107,38 +108,21 @@ class DetailContent extends StatelessWidget {
                             ElevatedButton(
                               onPressed: () async {
                                 if (!isAddedWatchlist) {
-                                  await Provider.of<TvSeriesDetailNotifier>(
-                                      context,
-                                      listen: false)
-                                      .addWatchlist(tv);
+                                  context
+                                      .read<DetailBloc>()
+                                      .add(AddToWatchlist(tv));
                                 } else {
-                                  await Provider.of<TvSeriesDetailNotifier>(
-                                      context,
-                                      listen: false)
-                                      .removeFromWatchlist(tv);
+                                  context
+                                      .read<DetailBloc>()
+                                      .add(RemoveFromWatchlist(tv));
                                 }
 
                                 final message =
-                                    Provider.of<TvSeriesDetailNotifier>(context,
-                                        listen: false)
-                                        .watchlistMessage;
+                                    context.read<DetailBloc>().state.message;
 
-                                if (message ==
-                                    TvSeriesDetailNotifier
-                                        .watchlistAddSuccessMessage ||
-                                    message ==
-                                        TvSeriesDetailNotifier
-                                            .watchlistRemoveSuccessMessage) {
+                                if (message.isNotEmpty) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(content: Text(message)));
-                                } else {
-                                  showDialog(
-                                      context: context,
-                                      builder: (context) {
-                                        return AlertDialog(
-                                          content: Text(message),
-                                        );
-                                      });
                                 }
                               },
                               child: Row(
@@ -179,18 +163,16 @@ class DetailContent extends StatelessWidget {
                               'Recommendations',
                               style: kHeading6,
                             ),
-                            Consumer<TvSeriesDetailNotifier>(
-                              builder: (context, data, child) {
-                                if (data.recommendationState ==
-                                    RequestState.Loading) {
+                            BlocBuilder<DetailBloc, DetailState>(
+                              builder: (context, state) {
+                                if (state.isLoadingRecommendations) {
                                   return Center(
                                     child: CircularProgressIndicator(),
                                   );
-                                } else if (data.recommendationState ==
-                                    RequestState.Error) {
-                                  return Text(data.message);
-                                } else if (data.recommendationState ==
-                                    RequestState.Loaded) {
+                                } else if (state.message.isNotEmpty &&
+                                    state.recommendations.isEmpty) {
+                                  return Text(state.message);
+                                } else {
                                   return Container(
                                     height: 150,
                                     child: ListView.builder(
@@ -213,15 +195,15 @@ class DetailContent extends StatelessWidget {
                                               ),
                                               child: CachedNetworkImage(
                                                 imageUrl:
-                                                'https://image.tmdb.org/t/p/w500${tv.posterPath}',
+                                                    'https://image.tmdb.org/t/p/w500${tv.posterPath}',
                                                 placeholder: (context, url) =>
                                                     Center(
-                                                      child:
+                                                  child:
                                                       CircularProgressIndicator(),
-                                                    ),
+                                                ),
                                                 errorWidget:
                                                     (context, url, error) =>
-                                                    Icon(Icons.error),
+                                                        Icon(Icons.error),
                                               ),
                                             ),
                                           ),
@@ -230,8 +212,6 @@ class DetailContent extends StatelessWidget {
                                       itemCount: recommendations.length,
                                     ),
                                   );
-                                } else {
-                                  return Container();
                                 }
                               },
                             ),
